@@ -40,7 +40,8 @@ from omegaconf import OmegaConf
 GROUNDING_BOX_THRESHOLD = 0.2
 GROUNDING_TEXT_THRESHOLD = 0.15
 CAMERAS = ["head", "hand_left", "hand_right"]
-ARK_API_KEY = "<seededit-api-key>"
+# Volcengine Ark API key (SeedEdit / images.generate). Must be a real key from the Ark console.
+ARK_API_KEY = (os.environ.get("ARK_API_KEY") or "").strip()
 
 def estimate_plane_ransac(points, threshold=0.001):
     """RANSAC plane fitting"""
@@ -147,6 +148,7 @@ class Preprocessor:
         self.vggt_checkpoint_path = args.vggt_checkpoint_path
         self.config = OmegaConf.load(args.config_path)
         self.steps = args.steps
+        self.ark_seededit_model = (getattr(args, "ark_seededit_model", None) or "").strip() or None
         if self.config.task_n_object == 2:
             self.care_obj_names = [self.config.mask_names.object, self.config.mask_names.target]
         elif self.config.task_n_object == 1:
@@ -313,12 +315,27 @@ class Preprocessor:
         torch.cuda.empty_cache()
     
     def edit_images_with_prompt(self, save_dir, image_path_list, prompt=[''], image_shape=(518, 294), base_name=None):
+        if not ARK_API_KEY:
+            raise RuntimeError(
+                "ARK_API_KEY is not set or is empty. Before running, export your Volcengine Ark API key, "
+                "for example: export ARK_API_KEY='your-key'. "
+                "Create the key in the Volcengine console (方舟 / Ark). "
+                "A placeholder like '<seededit-api-key>' is not valid and triggers 401 'API key format is incorrect'."
+            )
         client = initialize_client(ARK_API_KEY)
         if isinstance(prompt, str):
             prompt = [prompt]
         for prompt_i in prompt:
             print(f"Prompting SeedEdit: {prompt_i}")
-            edit_image_list(client, image_path_list, prompt_i, save_dir, image_shape=image_shape, basename=base_name)
+            edit_image_list(
+                client,
+                image_path_list,
+                prompt_i,
+                save_dir,
+                image_shape=image_shape,
+                basename=base_name,
+                model=self.ark_seededit_model,
+            )
         return
     
     def preprocess_seededit(self):
@@ -696,6 +713,12 @@ if __name__ == "__main__":
     parser.add_argument('--vggt_checkpoint_path', type=str, default="checkpoints/metric_vggt_cotrain.pth")
     parser.add_argument("--steps", type=str, default='1234567')
     parser.add_argument("--config_path", type=str, default="configs/mug_to_box_1654490.yaml")
+    parser.add_argument(
+        "--ark_seededit_model",
+        type=str,
+        default="",
+        help="Volcengine Ark model id for SeedEdit i2i (overrides ARK_SEEDEDIT_MODEL env). Required if default model returns 404.",
+    )
     args = parser.parse_args()
     preprocessor = Preprocessor(args)
     preprocessor.preprocess()

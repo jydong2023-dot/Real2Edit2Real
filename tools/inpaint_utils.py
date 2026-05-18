@@ -1,3 +1,4 @@
+import math
 import os
 # Install Ark SDK via: pip install 'volcengine-python-sdk[ark]'
 from volcenginesdkarkruntime import Ark
@@ -83,6 +84,20 @@ def cv2_image_to_b64(image=None, image_path=None, image_format="png"):
     # 4. Concatenate into standard format
     return f"data:image/{image_format};base64,{img_base64}"
 
+# Legacy default; Ark may retire IDs — set ARK_SEEDEDIT_MODEL to the model/endpoint id shown in your Ark console.
+_DEFAULT_SEEDEDIT_I2I_MODEL = "doubao-seededit-3-0-i2i-250628"
+
+
+def resolve_seededit_model(explicit=None):
+    """Prefer CLI `explicit`, else env ARK_SEEDEDIT_MODEL, else legacy default."""
+    if explicit is not None and str(explicit).strip():
+        return str(explicit).strip()
+    env = (os.environ.get("ARK_SEEDEDIT_MODEL") or "").strip()
+    if env:
+        return env
+    return _DEFAULT_SEEDEDIT_I2I_MODEL
+
+
 def initialize_client(ark_api_key):
     os.environ["ARK_API_KEY"] = ark_api_key
     client = Ark(
@@ -93,15 +108,46 @@ def initialize_client(ark_api_key):
     )
     return client
 
-def edit_image_list(client, image_path_list, prompt, save_dir, basename=None, image_shape=None):
+def _wxh_meeting_min_pixels(w, h, min_pixels):
+    """Return 'WxH' with same aspect ratio, total pixels >= min_pixels (Ark rejects small outputs)."""
+    w, h = int(w), int(h)
+    if w * h >= min_pixels:
+        return f"{w}x{h}"
+    scale = math.sqrt(min_pixels / float(w * h)) * 1.01
+    nw = max(1, int(math.ceil(w * scale)))
+    nh = max(1, int(math.ceil(h * scale)))
+    while nw * nh < min_pixels:
+        if nw <= nh:
+            nw += 1
+        else:
+            nh += 1
+    return f"{nw}x{nh}"
+
+
+def _seededit_size_arg(image_path, image_shape):
+    """Ark images.generate: size must be 'WxH', '1k', '2k', or '4k'; output area has a lower bound."""
+    min_px = int((os.environ.get("ARK_SEEDEDIT_MIN_PIXELS") or "921600").strip() or "921600")
+    if image_shape is not None and len(image_shape) >= 2:
+        w, h = int(image_shape[0]), int(image_shape[1])
+        return _wxh_meeting_min_pixels(w, h, min_px)
+    im = cv2.imread(image_path)
+    if im is not None:
+        ih, iw = im.shape[:2]
+        return _wxh_meeting_min_pixels(iw, ih, min_px)
+    return "2k"
+
+
+def edit_image_list(client, image_path_list, prompt, save_dir, basename=None, image_shape=None, model=None):
+    model_id = resolve_seededit_model(model)
     for image_idx, image_path in enumerate(image_path_list):
+        size_arg = _seededit_size_arg(image_path, image_shape)
         imagesResponse = client.images.generate(
-            model="doubao-seededit-3-0-i2i-250628",
+            model=model_id,
             prompt=prompt,
             image=cv2_image_to_b64(image_path=image_path),
             seed=123,
             guidance_scale=5.5,
-            size="adaptive",
+            size=size_arg,
             watermark=False,
             response_format="b64_json"
         )

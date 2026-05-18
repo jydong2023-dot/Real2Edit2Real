@@ -1,3 +1,6 @@
+export ARK_API_KEY='232bda6a-0267-4aa9-8fc0-707dcf4808c2'
+export ARK_SEEDEDIT_MODEL='ep-20260419213601-jbm5h'
+# export ARK_SEEDEDIT_MODEL='ep-20260419213601-jbm5h'
 # Parse parameters
 GPU_ID=$(nvidia-smi --query-gpu=memory.free --format=csv,nounits,noheader | \
          nl -v 0 | \
